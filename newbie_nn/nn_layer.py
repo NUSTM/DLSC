@@ -8,25 +8,49 @@ import numpy as np
 import tensorflow as tf
 
 
-def cnn_layer(inputs, filter_size, strides, padding, random_base, l2_reg, active_func=None, scope_name="conv"):
-    w = tf.get_variable(
-        name='conv' + scope_name,
-        shape=filter_size,
-        # initializer=tf.random_normal_initializer(mean=0., stddev=1.0),
-        initializer=tf.random_uniform_initializer(-random_base, random_base),
-        regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
-    )
-    b = tf.get_variable(
-        name='softmax_b' + scope_name,
-        shape=[filter_size[-1]],
-        # initializer=tf.random_normal_initializer(mean=0., stddev=1.0),
-        initializer=tf.random_uniform_initializer(-random_base, random_base),
-        regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
-    )
-    x = tf.nn.conv2d(inputs, w, strides, padding) + b
+def mlp_layer(inputs, layer_sizes, keep_probs, random_base, l2_reg, active_func=None, scope_name='mlp'):
+    weight_matrix = zip(layer_sizes, layer_sizes[1:])
+    with tf.variable_scope(scope_name):
+        cnt = 0
+        for n_in, n_out in weight_matrix[:-1]:
+            w = tf.get_variable(
+                name='mlp_w_' + str(cnt),
+                shape=[n_in, n_out],
+                initializer=tf.random_uniform_initializer(-random_base, random_base),
+                regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
+            )
+            b = tf.get_variable(
+                name='mlp_b_' + str(cnt),
+                shape=[n_out],
+                initializer=tf.random_uniform_initializer(-random_base, random_base),
+                regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
+            )
+            inputs = tf.nn.dropout(inputs, keep_prob=keep_probs[cnt])
+            inputs = active_func(tf.nn.xw_plus_b(inputs, w, b))
+    return inputs
+
+
+def cnn_layer(inputs, filter_shape, strides, padding, random_base, l2_reg, active_func=None, scope_name="cnn"):
+    with tf.variable_scope(scope_name):
+        w = tf.get_variable(
+            name='conv_w',
+            shape=filter_shape,
+            # initializer=tf.random_normal_initializer(mean=0., stddev=1.0),
+            initializer=tf.random_uniform_initializer(-random_base, random_base),
+            regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
+        )
+        b = tf.get_variable(
+            name='conv_b',
+            shape=[filter_shape[-1]],
+            # initializer=tf.random_normal_initializer(mean=0., stddev=1.0),
+            initializer=tf.random_uniform_initializer(-random_base, random_base),
+            regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
+        )
+    conv = tf.nn.conv2d(inputs, w, strides, padding)
+    h = tf.nn.bias_add(conv, b)
     if active_func is None:
         active_func = tf.nn.relu
-    return active_func(x)
+    return active_func(h)
 
 
 def dynamic_rnn(cell, inputs, n_hidden, length, max_len, scope_name, out_type='last'):
@@ -57,7 +81,7 @@ def bi_dynamic_rnn(cell, inputs, n_hidden, length, max_len, scope_name, out_type
     )
     if out_type == 'last':
         outputs_fw, outputs_bw = outputs
-        outputs_bw = tf.reverse_sequence(outputs_bw, tf.cast(length, tf.int64), seq_dim=1)
+        outputs_bw = tf.reverse_sequence(outputs_bw, tf.cast(length, tf.int64), seq_axis=1)
         outputs = tf.concat([outputs_fw, outputs_bw], 2)
     else:
         outputs = tf.concat(outputs, 2)  # batch_size * max_len * 2n_hidden
@@ -105,7 +129,7 @@ def stack_bi_dynamic_rnn(cells_fw, cells_bw, inputs, n_hidden, n_layer, length, 
         sequence_length=length, dtype=tf.float32, scope=scope_name)
     if out_type == 'last':
         outputs_fw, outputs_bw = tf.split(2, 2, outputs)
-        outputs_bw = tf.reverse_sequence(outputs_bw, tf.cast(length, tf.int64), seq_dim=1)
+        outputs_bw = tf.reverse_sequence(outputs_bw, tf.cast(length, tf.int64), seq_axis=1)
         outputs = tf.concat([outputs_fw, outputs_bw], 2)
     batch_size = tf.shape(outputs)[0]
     if out_type == 'last':
@@ -127,25 +151,24 @@ def reduce_mean_with_len(inputs, length):
     return inputs
 
 
-def softmax_layer(inputs, n_hidden, random_base, keep_prob, l2_reg, n_class, scope_name='1'):
-    w = tf.get_variable(
-        name='softmax_w' + scope_name,
-        shape=[n_hidden, n_class],
-        initializer=tf.random_normal_initializer(mean=0., stddev=np.sqrt(2. / (n_hidden + n_class))),
-        # initializer=tf.random_uniform_initializer(-random_base, random_base),
-        # initializer=tf.random_uniform_initializer(-np.sqrt(6.0 / (n_hidden + n_class)), np.sqrt(6.0 / (n_hidden + n_class))),
-        regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
-    )
-    b = tf.get_variable(
-        name='softmax_b' + scope_name,
-        shape=[n_class],
-        initializer=tf.random_normal_initializer(mean=0., stddev=np.sqrt(2. / (n_class))),
-        # initializer=tf.random_uniform_initializer(-random_base, random_base),
-        regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
-    )
+def softmax_layer(inputs, n_hidden, random_base, keep_prob, l2_reg, n_class, scope_name='softmax'):
+    with tf.variable_scope(scope_name):
+        w = tf.get_variable(
+            name='softmax_w',
+            shape=[n_hidden, n_class],
+            # initializer=tf.random_normal_initializer(mean=0., stddev=np.sqrt(2. / (n_hidden + n_class))),
+            initializer=tf.random_uniform_initializer(-random_base, random_base),
+            regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
+        )
+        b = tf.get_variable(
+            name='softmax_b',
+            shape=[n_class],
+            # initializer=tf.random_normal_initializer(mean=0., stddev=np.sqrt(2. / (n_class))),
+            initializer=tf.random_uniform_initializer(-random_base, random_base),
+            regularizer=tf.contrib.layers.l2_regularizer(l2_reg)
+        )
     with tf.name_scope('softmax'):
         outputs = tf.nn.dropout(inputs, keep_prob=keep_prob)
-        predict = tf.matmul(outputs, w) + b
-        predict = tf.nn.softmax(predict)
-    return predict
+        scores = tf.nn.xw_plus_b(outputs, w, b, 'scores')
+    return scores
 
