@@ -15,3 +15,6 @@ EMNLP 2015 full paper
 [http://www.aclweb.org/old_anthology/D/D15/D15-1167.pdf]
 
 
+### Explanation
+
+There are four models (**RNN_CNN, CNN_RNN, HNN, HAN**) in **model/hn_doc.py**.
